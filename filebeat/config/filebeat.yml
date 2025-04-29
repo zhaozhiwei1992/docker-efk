@@ -1,0 +1,76 @@
+# ============================ 输入配置 =============================
+filebeat.inputs:
+# 1. 采集系统日志（journald）
+- type: filestream  # 替代旧版 "system" 输入类型，更高性能[6](@ref)
+  id: system-journal
+  enabled: true
+  paths:
+    - /var/log/journal/**/*.journal
+  fields:
+    log_type: "system"
+  parsers:  # 解析 journald 格式[5](@ref)
+    - ndjson:
+        keys_under_root: true
+
+# 2. 采集自定义应用日志
+- type: log
+  id: app-logs
+  enabled: true
+  paths:
+    - /var/log/myapp/*.log
+  fields:
+    log_type: "app"
+  multiline:  # 处理多行日志（如 Java 堆栈）[3,8](@ref)
+    pattern: '^\d{4}-\d{2}-\d{2}'
+    negate: true
+    match: after
+    timeout: 5s
+
+# ============================ 模块配置 =============================
+filebeat.modules:  # 启用预定义解析规则[1](@ref)
+  - module: system
+    syslog:
+      enabled: false  # 若需采集 syslog 可开启
+    auth:
+      enabled: true
+
+# ============================ 处理管道 =============================
+processors:
+  - add_host_metadata: ~  # 添加主机信息[6](@ref)
+  - add_docker_metadata: ~
+  - drop_fields:  # 清理冗余字段[7](@ref)
+      fields: ["agent.ephemeral_id", "log.offset"]
+      ignore_missing: true
+
+# ============================ 输出配置 =============================
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  username: "elastic"
+  password: "changeme"
+#  ssl:  # 启用 TLS 加密[6](@ref)
+#    enabled: true
+#    certificate_authorities: ["/etc/filebeat/certs/ca.crt"]
+  indices:  # 动态索引路由[2](@ref)
+    - index: "system-%{+yyyy.MM.dd}"
+      when.equals:
+        fields.log_type: "system"
+    - index: "app-%{+yyyy.MM.dd}"
+      when.equals:
+        fields.log_type: "app"
+  ilm:  # 索引生命周期管理[5](@ref)
+    enabled: true
+    policy_name: "hot-warm-cold"
+
+# ============================ 全局配置 =============================
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+  permissions: 0644
+
+setup.template:  # 自定义索引模板[3](@ref)
+  name: "custom-template"
+  pattern: "*-*"
+  overwrite: true
