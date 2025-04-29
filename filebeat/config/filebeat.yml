@@ -26,6 +26,25 @@ filebeat.inputs:
     match: after
     timeout: 5s
 
+# ============================ 自动发现 =============================
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      hints.enabled: true
+      templates:
+        - condition:
+            contains:
+              docker.container.image: elasticsearch
+          config:
+            - module: elasticsearch
+              server:
+                input:
+                  type: container
+                  paths:
+                    - /var/lib/docker/containers/${data.container.id}/*-json.log
+                  fields:
+                    log_type: "es_container"
+
 # ============================ 模块配置 =============================
 filebeat.modules:  # 启用预定义解析规则[1](@ref)
   - module: system
@@ -57,6 +76,9 @@ output.elasticsearch:
     - index: "app-%{+yyyy.MM.dd}"
       when.equals:
         fields.log_type: "app"
+    - index: "infra-%{+yyyy.MM.dd}"
+      when.equals:
+        fields.log_type: "es_container"
   ilm:  # 索引生命周期管理[5](@ref)
     enabled: true
     policy_name: "hot-warm-cold"
